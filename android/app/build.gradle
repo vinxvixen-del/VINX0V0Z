@@ -1,0 +1,56 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.vinx0voz.app"
+    compileSdk 35
+
+    def keystoreFile = System.getenv("VINX_KEYSTORE_FILE")
+    def keystorePassword = System.getenv("VINX_KEYSTORE_PASSWORD")
+    def keyAliasValue = System.getenv("VINX_KEY_ALIAS")
+    def keyPassword = System.getenv("VINX_KEY_PASSWORD")
+    def signingReady = keystoreFile && keystorePassword && keyAliasValue && keyPassword
+
+    signingConfigs {
+        release {
+            if (signingReady) {
+                storeFile file(keystoreFile)
+                storePassword keystorePassword
+                keyAlias keyAliasValue
+                keyPassword keyPassword
+            }
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    def backendUrl = project.findProperty("BACKEND_URL")
+            ?: System.getenv("BACKEND_URL")
+            ?: "https://example.com"
+
+    defaultConfig {
+        applicationId "com.vinx0voz.app"
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+        buildConfigField "String", "BACKEND_URL", "\"${backendUrl}\""
+    }
+
+    buildTypes {
+        release {
+            if (signingReady) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+        }
+    }
+}

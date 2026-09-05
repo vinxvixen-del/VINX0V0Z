@@ -1,0 +1,14 @@
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.jks
+android/*.keystore
+node_modules/
+android/node_modules/
+*.db
+*.mp3
+__pycache__/
+downloads/*
+uploads/*
+outputs/*

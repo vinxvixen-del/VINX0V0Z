@@ -1,0 +1,11 @@
+imageio-ffmpeg>=0.6.0
+flask
+requests
+beautifulsoup4
+deep-translator
+edge-tts
+pypdf
+python-docx
+gunicorn
+google-generativeai==0.8.5
+

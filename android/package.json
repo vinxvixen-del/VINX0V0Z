@@ -1,0 +1,19 @@
+{
+  "name": "android",
+  "version": "1.0.0",
+  "description": "Esta APK abre la aplicación Flask de Termux dentro de un WebView nativo. No abre Chrome.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@capacitor/core": "^8.5.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.1"
+  }
+}
