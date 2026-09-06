@@ -426,9 +426,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const filename = document.getElementById('nombreArchivo').value || 'audio_salida';
             if (!texto) return alert('El campo de texto está vacío.');
 
-                   android/.gradle/
-            android/build/
-            android/app/build/
             try {
                 const res = await fetch('/api/tts/sintetizar', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({texto, voz, rate, pitch, filename}) });
                 const data = await res.json();
