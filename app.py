@@ -8,24 +8,16 @@ import json
 import zipfile
 import sqlite3
 import shutil
-import importlib
 from datetime import datetime, timezone
 from pathlib import Path
-from flask import Flask, render_template_string, request, jsonify, send_from_directory, send_file
+from flask import Flask, render_template_string, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import edge_tts
-try:
-    genai = importlib.import_module("google.generativeai")
-except ImportError:
-    genai = None
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024  # 1GB
 
-ALLOWED_EXTENSIONS = {
-    "mp3", "wav", "ogg", "m4a", "mp4", "webm",
-    "mov", "avi", "srt", "vtt", "txt"
-}
+ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "m4a", "mp4", "webm", "mov", "avi", "srt", "vtt", "txt", "jpg", "png", "jpeg"}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "outputs")
@@ -53,811 +45,407 @@ def registrar_produccion(nombre: str, archivo: str, tipo: str = "audio"):
 
 inicializar_base_datos()
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-if GEMINI_API_KEY and genai is not None:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
-
-# --- INTERFAZ MAESTRA POTENCIADA Y UNIFICADA (VINX0V0Z PRO) ---
+# --- INTERFAZ MAESTRA PRO (TRANSFORMA TXT VOZ) ---
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VINX0V0Z - Multimedia & Voice Studio Pro</title>
+    <title>VINX0V0Z - Voice Studio</title>
     <style>
         :root {
-            --bg-color: #0d1117;
-            --card-bg: #161b22;
-            --accent-color: #8b5cf6;
-            --accent-hover: #7c3aed;
-            --text-color: #c9d1d9;
-            --border-color: #30363d;
-            --gold-color: #f59e0b;
+            --bg-color: #0a0c10;
+            --card-bg: #12151c;
+            --accent-color: #bb86fc;
+            --accent-hover: #9965f4;
+            --text-primary: #e1e4e8;
+            --text-secondary: #8b949e;
+            --border-color: #2d333b;
+            --gold: #ffb74d;
         }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', Roboto, sans-serif;
             background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 20px;
+            color: var(--text-primary);
+            margin: 0; padding: 0;
+            display: flex; flex-direction: column;
+            height: 100vh; overflow: hidden;
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        header {
-            text-align: center;
-            margin-bottom: 25px;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 15px;
-        }
-        h1 {
-            color: #a78bfa;
-            font-size: 2.2rem;
-            margin: 0;
-        }
-        .subtitle {
-            color: var(--gold-color);
-            font-size: 0.9rem;
-            margin-top: 5px;
-        }
-        .grid-container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-        @media(max-width: 768px) {
-            .grid-container { grid-template-columns: 1fr; }
-        }
-        .card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            margin-bottom: 20px;
-        }
-        .card h3 {
-            margin-top: 0;
-            color: #c084fc;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 10px;
-        }
-        label {
-            display: block;
-            margin-top: 12px;
-            font-weight: 600;
-            font-size: 0.85rem;
-            color: #d2d6dc;
-        }
-        input, select, textarea {
-            width: 100%;
-            padding: 10px;
-            margin-top: 5px;
-            background-color: #010409;
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            border-radius: 6px;
-            box-sizing: border-box;
-        }
+        header { text-align: center; padding: 8px; border-bottom: 1px solid var(--border-color); background: var(--card-bg); }
+        h1 { margin: 0; color: var(--accent-color); font-size: 1.4rem; letter-spacing: 2px; }
+        .subtitle { font-size: 0.75rem; color: var(--gold); margin-top: 2px; }
+
+        .main-layout { display: flex; flex: 1; overflow: hidden; flex-direction: column; }
+        
+        .editor-section { flex: 1; display: flex; flex-direction: column; padding: 8px; background: var(--bg-color); }
+        .editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .editor-header span { font-weight: bold; color: var(--accent-color); font-size: 0.85rem; }
+        
         textarea {
-            resize: vertical;
-            height: 100px;
+            flex: 1; width: 100%; background: #010409; border: 1px solid var(--border-color);
+            color: #fff; padding: 12px; border-radius: 8px; font-size: 1.1rem; line-height: 1.4; resize: none; outline: none;
         }
-        button {
-            background-color: var(--accent-color);
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            width: 100%;
-            margin-top: 15px;
-            transition: background 0.2s;
+
+        .tools-area { background: var(--card-bg); border-top: 1px solid var(--border-color); max-height: 60%; overflow-y: auto; }
+        .accordion { border-bottom: 1px solid var(--border-color); }
+        .accordion-btn {
+            width: 100%; padding: 12px 15px; background: none; border: none; color: var(--text-primary);
+            text-align: left; font-weight: bold; display: flex; justify-content: space-between; cursor: pointer;
         }
-        button:hover {
-            background-color: var(--accent-hover);
+        .panel { padding: 0 15px; display: none; background: #0d1117; padding-bottom: 15px; }
+        .panel.active { display: block; }
+
+        .master-player { padding: 8px; background: #000; text-align: center; border-bottom: 1px solid var(--border-color); }
+        #masterMedia { max-width: 100%; max-height: 180px; display: none; border-radius: 4px; }
+        #masterAudio { width: 100%; margin-top: 4px; }
+
+        .btn {
+            background: var(--accent-color); color: #000; border: none; padding: 10px;
+            border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 8px; width: 100%;
         }
-        .mic-btn {
-            background-color: #2d1b4e;
-            border: 1px solid #a855f7;
-            color: #e9d5ff;
-            margin-bottom: 10px;
-        }
-        .media-player-box {
-            background: #000;
-            border-radius: 8px;
-            padding: 10px;
-            text-align: center;
-            margin-top: 10px;
-            border: 1px solid var(--border-color);
-        }
-        video, audio {
-            width: 100%;
-            border-radius: 6px;
-            outline: none;
-        }
-        .speed-controls {
-            display: flex;
-            gap: 5px;
-            margin-top: 10px;
-        }
-        .speed-btn {
-            background-color: #21262d;
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            padding: 6px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            border-radius: 4px;
-            flex: 1;
-            margin-top: 0;
-        }
-        .speed-btn:hover {
-            background-color: #30363d;
-        }
-        .karaoke-screen {
-            background: #010409;
-            border: 1px dashed var(--accent-color);
-            border-radius: 6px;
-            padding: 12px;
-            min-height: 60px;
-            max-height: 120px;
-            overflow-y: auto;
-            font-family: monospace;
-            color: #d8b4fe;
-            margin-top: 10px;
-            font-size: 0.9rem;
-        }
-        .karaoke-screen span.active {
-            color: var(--gold-color);
-            background: rgba(245, 158, 11, 0.2);
-            font-weight: bold;
-            padding: 2px 4px;
-            border-radius: 3px;
-        }
-        .library-list {
-            max-height: 150px;
-            overflow-y: auto;
-            background: #010409;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 8px;
-            font-size: 0.85rem;
-        }
-        .library-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 6px;
-            border-bottom: 1px solid #21262d;
-        }
-        .library-item a {
-            color: #a78bfa;
-            text-decoration: none;
-        }
+        .btn-secondary { background: #30363d; color: #fff; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        input, select { width: 100%; padding: 8px; background: #010409; border: 1px solid var(--border-color); color: #fff; border-radius: 4px; margin-top: 5px; box-sizing: border-box; }
+        label { display: block; margin-top: 8px; font-size: 0.75rem; color: var(--text-secondary); }
+
+        .lib-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid var(--border-color); cursor: pointer; align-items: center; }
+        .lib-item:hover { background: rgba(255,255,255,0.05); }
+        .lib-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
+        .download-link { color: var(--accent-color); text-decoration: none; font-weight: bold; padding: 5px 10px; border: 1px solid; border-radius: 4px; font-size: 0.7rem; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>⚡ VINX0V0Z</h1>
-            <div class="subtitle">Multimedia & Voice Studio Pro • Motor Híbrido IA & Producción Masiva</div>
-        </header>
+    <header>
+        <h1>VINX0V0Z</h1>
+        <div class="subtitle">Voice Studio</div>
+    </header>
 
-        <div class="grid-container">
-            <!-- COLUMNA IZQUIERDA: IA, MICRÓFONO Y ESTUDIO DE VOZ -->
-            <div>
-                <div class="card">
-                    <h3>🤖 Asistente IA & Generador de Guiones</h3>
-                    <label>Idea o Prompt para Letra/Guion/Podcast:</label>
-                    <textarea id="promptIa" rows="2" placeholder="Ej: Estructura una letra de Trap en 90 BPM..."></textarea>
-                    <button type="button" onclick="generarGuion()">✨ Generar Contenido con IA</button>
-                </div>
+    <div class="master-player">
+        <video id="masterMedia" controls></video>
+        <audio id="masterAudio" controls></audio>
+    </div>
 
-                <div class="card">
-                    <h3>🎙️ Consola de Producción y Voz</h3>
-                    <button type="button" class="mic-btn" id="micBtn" onclick="toggleMic()">🎙️ Dictar por Micrófono (Voz a Texto)</button>
-                    
-                    <label>Texto, Guión o Script Masivo:</label>
-                    <textarea id="textoInput" placeholder="Escribe, pega texto o genera contenido con IA..."></textarea>
-                    
-                    <label>Título de la Producción (Archivo):</label>
-                    <input type="text" id="nombreArchivo" value="produccion_vinx_01">
+    <div class="main-layout">
+        <section class="editor-section">
+            <div class="editor-header">
+                <span>TRANSFORMA TXT VOZ</span>
+                <small id="charCount" style="color:var(--text-secondary)">0 chars</small>
+            </div>
+            <textarea id="mainText" placeholder="Pega aquí guiones, libros o textos infinitos..."></textarea>
+            <button class="btn" onclick="procesarVozInfinita()">🚀 PROCESAR Y ESCUCHAR</button>
+        </section>
 
-                    <label>Catálogo Global de Voces e Idiomas:</label>
-                    <select id="vozSelect">
-                        <option value="es-MX-DaliaNeural">Dalia (México - Femenina)</option>
-                        <option value="es-MX-JorgeNeural">Jorge (México - Masculino)</option>
-                        <option value="es-ES-AlvaroNeural">Álvaro (España - Masculino)</option>
-                        <option value="es-ES-ElviraNeural">Elvira (España - Femenina)</option>
-                        <option value="es-AR-TomasNeural">Tomás (Argentina - Masculino)</option>
-                        <option value="es-CO-SalomeNeural">Salomé (Colombia - Femenina)</option>
-                        <option value="en-US-AndrewNeural">Andrew (USA - Masculino)</option>
-                        <option value="en-US-JennyNeural">Jenny (USA - Femenina)</option>
-                        <option value="fr-FR-HenriNeural">Henri (Francia - Francés)</option>
-                        <option value="ja-JP-NanamiNeural">Nanami (Japón - Japonés)</option>
-                        <option value="de-DE-KillianNeural">Killian (Alemania - Alemán)</option>
-                        <option value="it-IT-DiegoNeural">Diego (Italia - Italiano)</option>
-                        <option value="pt-BR-AntonioNeural">Antonio (Brasil - Portugués)</option>
+        <div class="tools-area">
+            <div class="accordion">
+                <button class="accordion-btn" onclick="togglePanel('panelVoces')">🗣️ Catálogo de Voces <span>+</span></button>
+                <div id="panelVoces" class="panel">
+                    <select id="langFilter" onchange="filtrarVoces()">
+                        <option value="es">Español (Principal)</option>
+                        <option value="en">Inglés</option>
+                        <option value="all">Todas las Voces</option>
                     </select>
-
-                    <div style="display: flex; gap: 10px;">
-                        <div style="flex:1;">
-                            <label>Velocidad (%):</label>
-                            <input type="range" id="rateRange" min="-50" max="50" value="0">
-                        </div>
-                        <div style="flex:1;">
-                            <label>Tono (Hz):</label>
-                            <input type="range" id="pitchRange" min="-20" max="20" value="0">
-                        </div>
+                    <select id="voiceSelect"></select>
+                    <div class="grid-2">
+                        <div><label>Velocidad:</label><input type="range" id="rate" min="-50" max="50" value="0"></div>
+                        <div><label>Tono:</label><input type="range" id="pitch" min="-20" max="20" value="0"></div>
                     </div>
-
-                    <button type="button" onclick="sintetizarVoz()">🚀 Limpiar, Procesar y Generar Audio</button>
                 </div>
             </div>
 
-            <!-- COLUMNA DERECHA: KARAOKE, REPRODUCTOR Y HERRAMIENTAS AVANZADAS -->
-            <div>
-                <div class="card">
-                    <h3>👁️ Visor de Audio y Texto (Karaoke Vivo & SRT)</h3>
-                    <div class="karaoke-screen" id="karaokeBox">Esperando síntesis de audio...</div>
-
-                    <label style="margin-top: 15px;">Reproductor Principal HD</label>
-                    <div class="media-player-box">
-                        <audio id="audioPlayer" controls></audio>
-                        <div class="speed-controls">
-                            <button class="speed-btn" onclick="setSpeed(0.5)">0.5x</button>
-                            <button class="speed-btn" onclick="setSpeed(1.0)">1.0x</button>
-                            <button class="speed-btn" onclick="setSpeed(1.5)">1.5x</button>
-                            <button class="speed-btn" onclick="setSpeed(2.0)">2.0x</button>
-                        </div>
+            <div class="accordion">
+                <button class="accordion-btn" onclick="togglePanel('panelFX')">🎚️ Estudio & Masterización <span>+</span></button>
+                <div id="panelFX" class="panel">
+                    <div class="grid-2">
+                        <button class="btn btn-secondary" onclick="applyPreset('radio')">📻 Locutor</button>
+                        <button class="btn btn-secondary" onclick="applyPreset('pro')">💎 Voz Pro</button>
+                        <button class="btn btn-secondary" onclick="applyPreset('eco')">🏟️ Eco</button>
+                        <button class="btn btn-secondary" onclick="resetFX()">🔄 Limpio</button>
                     </div>
+                    <label>Ecualización personalizada:</label>
+                    <input type="range" id="eqLow" min="-12" max="12" value="0" oninput="updateFX()"><small>Bajos</small>
+                    <input type="range" id="eqHigh" min="-12" max="12" value="0" oninput="updateFX()"><small>Brillo</small>
                 </div>
+            </div>
 
-                <div class="card">
-                    <h3>🎬 Reproductor Multimedia & Edición Avanzada</h3>
-                    <div class="media-player-box">
-                        <video id="mainVideo" controls>
-                            <source src="" type="video/mp4">
-                        </video>
-                    </div>
-
-                    <label style="margin-top: 12px;">Cargar Archivo Multimedia (Audio/Video/Docs):</label>
-                    <input type="file" id="mediaFile">
-                    
-                    <button type="button" style="background-color: #238636;" onclick="subirArchivo()">⬆️ Cargar Archivo Multimedia</button>
-                    <button type="button" style="background-color: #238636;" onclick="separarStems()">🎧 Separar Audio / Reducir Ruido</button>
-                    <button type="button" style="background-color: #1f6feb;" onclick="generarVideo()">🎥 Generar Video Temático / Subtítulos</button>
-                    <button type="button" style="background-color: #d97706;" onclick="exportarPaquete()">📦 Exportar Paquete ZIP de Distribución</button>
+            <div class="accordion">
+                <button class="accordion-btn" onclick="togglePanel('panelVideo')">🎥 Creador de Video <span>+</span></button>
+                <div id="panelVideo" class="panel">
+                    <label>Imágenes/Videos locales:</label>
+                    <input type="file" id="mediaFiles" multiple accept="image/*,video/*">
+                    <button class="btn btn-secondary" onclick="crearVideoSequence()">🎬 Unir con Audio de Voz</button>
                 </div>
+            </div>
 
-                <div class="card">
-                    <h3>📂 Biblioteca de Producciones (Historial Local)</h3>
-                    <div class="library-list" id="libraryBox">
-                        <div class="library-item"><span>Sin producciones recientes.</span></div>
-                    </div>
+            <div class="accordion">
+                <button class="accordion-btn" onclick="togglePanel('panelLib')">📂 Historial de Producciones <span>+</span></button>
+                <div id="panelLib" class="panel">
+                    <button class="btn btn-secondary" style="background:#4a148c" onclick="vaciarApp()">🗑️ Limpiar Caché App</button>
+                    <div id="libList" style="margin-top:10px;"></div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        let recognition; let isRecording = false; let ultimoArchivo = '';
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRecognition();
-            recognition.lang = 'es-MX'; recognition.continuous = true; recognition.interimResults = true;
-            recognition.onresult = (e) => {
-                let t = '';
-                for (let i = e.resultIndex; i < e.results.length; i++) { t += e.results[i][0].transcript; }
-                document.getElementById('textoInput').value = t;
-            };
-        }
-        function toggleMic() {
-            if (!recognition) return alert('Micrófono no soportado en este navegador.');
-            const btn = document.getElementById('micBtn');
-            if (!isRecording) { recognition.start(); isRecording = true; btn.innerText = '🔴 Grabando Voz...'; btn.style.background = '#831843'; }
-            else { recognition.stop(); isRecording = false; btn.innerText = '🎙️ Dictar por Micrófono'; btn.style.background = '#2d1b4e'; }
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let source, lowNode, highNode, compNode, reverbNode;
+        let currentAudioFile = "";
+
+        function initAudioFX() {
+            const player = document.getElementById('masterAudio');
+            if (source) return;
+            source = audioCtx.createMediaElementSource(player);
+            lowNode = audioCtx.createBiquadFilter(); lowNode.type = 'lowshelf';
+            highNode = audioCtx.createBiquadFilter(); highNode.type = 'highshelf';
+            compNode = audioCtx.createDynamicsCompressor();
+            source.connect(lowNode); lowNode.connect(highNode); highNode.connect(compNode); compNode.connect(audioCtx.destination);
         }
 
-        function setSpeed(rate) {
-            const audio = document.getElementById('audioPlayer');
-            const video = document.getElementById('mainVideo');
-            audio.playbackRate = rate;
-            video.playbackRate = rate;
+        function updateFX() {
+            initAudioFX();
+            lowNode.frequency.value = 250; lowNode.gain.value = document.getElementById('eqLow').value;
+            highNode.frequency.value = 3500; highNode.gain.value = document.getElementById('eqHigh').value;
         }
 
-        async function subirArchivo() {
-            const archivo = document.getElementById('mediaFile').files[0];
-            if (!archivo) return alert('Selecciona un archivo.');
+        function applyPreset(p) {
+            initAudioFX(); resetFX();
+            if(p==='radio') { lowNode.gain.value = 8; compNode.threshold.value = -30; compNode.ratio.value = 12; }
+            if(p==='pro') { lowNode.gain.value = 4; highNode.gain.value = 6; compNode.threshold.value = -15; }
+            if(p==='eco') { /* Reverb simple se puede emular con delay pero por espacio lo dejamos en EQ */ lowNode.gain.value = -5; highNode.gain.value = 8; }
+            updateFX();
+        }
 
-            const datos = new FormData();
-            datos.append('archivo', archivo);
+        function resetFX() { 
+            document.getElementById('eqLow').value = 0; document.getElementById('eqHigh').value = 0; 
+            if(compNode) { compNode.threshold.value = -10; compNode.ratio.value = 3; }
+            updateFX(); 
+        }
 
-            try {
-                const respuesta = await fetch('/api/media/upload', {
-                    method: 'POST',
-                    body: datos
-                });
-                const resultado = await respuesta.json();
+        function togglePanel(id) {
+            document.querySelectorAll('.panel').forEach(p => { if(p.id !== id) p.classList.remove('active'); });
+            document.getElementById(id).classList.toggle('active');
+        }
 
-                if (resultado.status !== 'ok') {
-                    return alert(resultado.error || 'No se pudo cargar el archivo.');
+        async function cargarVoces() {
+            const res = await fetch('/api/voices');
+            window.voces = await res.json();
+            filtrarVoces();
+        }
+
+        function filtrarVoces() {
+            const f = document.getElementById('langFilter').value;
+            const s = document.getElementById('voiceSelect');
+            s.innerHTML = '';
+            window.voces.forEach(v => {
+                if(f === 'all' || v.Name.startsWith(f)) {
+                    const o = document.createElement('option'); o.value = v.Name;
+                    o.innerText = `${v.Name.split('-')[1]} - ${v.Name.split('-')[2]} (${v.Gender === 'Female' ? '♀' : '♂'})`;
+                    if(v.Name.includes('Dalia')) o.selected = true;
+                    s.appendChild(o);
                 }
-
-                ultimoArchivo = resultado.filename;
-
-                if (archivo.type.startsWith('video/')) {
-                    const video = document.getElementById('mainVideo');
-                    video.src = resultado.url;
-                    video.load();
-                } else if (archivo.type.startsWith('audio/')) {
-                    const audio = document.getElementById('audioPlayer');
-                    audio.src = resultado.url;
-                    audio.load();
-                }
-
-                alert('Archivo cargado correctamente.');
-            } catch (error) {
-                alert('Error de conexión al cargar el archivo.');
-            }
-        }
-
-        async function generarGuion() {
-            const prompt = document.getElementById('promptIa').value;
-            if (!prompt) return alert('Ingresa una idea.');
-            try {
-                const res = await fetch('/api/ia/generar', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt, proveedor: 'gemini'}) });
-                const data = await res.json();
-                if(data.status === 'ok') { document.getElementById('textoInput').value = data.texto; }
-                else { alert('Error de IA: ' + (data.error || 'Desconocido')); }
-            } catch(e) { alert('Error conectando con el servidor de IA.'); }
-        }
-
-        async function sintetizarVoz() {
-            const texto = document.getElementById('textoInput').value;
-            const voz = document.getElementById('vozSelect').value;
-            const rate = parseInt(document.getElementById('rateRange').value);
-            const pitch = parseInt(document.getElementById('pitchRange').value);
-            const filename = document.getElementById('nombreArchivo').value || 'audio_salida';
-            if (!texto) return alert('El campo de texto está vacío.');
-
-            try {
-                const res = await fetch('/api/tts/sintetizar', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({texto, voz, rate, pitch, filename}) });
-                const data = await res.json();
-                if(data.status === 'ok') {
-                    const audioPlayer = document.getElementById('audioPlayer');
-                    audioPlayer.src = data.audio_url; audioPlayer.play();
-                    ultimoArchivo = data.filename;
-                    iniciarKaraokeVisual(texto);
-                    actualizarBiblioteca(filename, data.audio_url);
-                } else {
-                    alert('Error en síntesis: ' + (data.error || 'No se pudo generar'));
-                }
-            } catch(e) { alert('Error de conexión al procesar el audio.'); }
-        }
-
-
-        async function exportarPaquete() {
-            if (!ultimoArchivo) return alert('Genera o carga primero una producción.');
-            try {
-                const respuesta = await fetch('/api/exportar/zip', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({filename: ultimoArchivo})
-                });
-                const resultado = await respuesta.json();
-                if (resultado.status !== 'ok') return alert(resultado.error || 'No se pudo exportar el paquete.');
-                const enlace = document.createElement('a');
-                enlace.href = resultado.download_url;
-                enlace.download = resultado.filename;
-                enlace.click();
-            } catch (error) {
-                alert('Error de conexión al exportar el paquete.');
-            }
-        }
-        async function separarStems() {
-            if (!ultimoArchivo) return alert('Genera primero un audio.');
-            const respuesta = await fetch('/api/media/stems', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({audio: ultimoArchivo})
             });
-            const resultado = await respuesta.json();
-            if (resultado.status !== 'ok') return alert(resultado.error);
-            alert(resultado.nota || 'Procesamiento completado.');
         }
 
-        async function generarVideo() {
-            if (!ultimoArchivo) return alert('Genera primero un audio.');
-            const respuesta = await fetch('/api/media/video', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({audio: ultimoArchivo})
-            });
-            const resultado = await respuesta.json();
-            if (resultado.status !== 'ok') return alert(resultado.error);
-            const video = document.getElementById('mainVideo');
-            video.src = resultado.video_url;
-            video.load();
-            alert('Vídeo generado correctamente.');
+        async function procesarVozInfinita() {
+            const text = document.getElementById('mainText').value;
+            const voice = document.getElementById('voiceSelect').value;
+            const rate = document.getElementById('rate').value;
+            const pitch = document.getElementById('pitch').value;
+            if(!text) return alert('Escribe algo.');
+            
+            const btn = event.target; btn.disabled = true; btn.innerText = '⌛ CONVIRTIENDO...';
+            try {
+                const res = await fetch('/api/tts/infinite', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text, voice, rate, pitch})
+                });
+                const d = await res.json();
+                if(d.status === 'ok') {
+                    currentAudioFile = d.filename;
+                    const audio = document.getElementById('masterAudio');
+                    audio.src = d.url; audio.play();
+                    cargarBiblioteca();
+                }
+            } finally { btn.disabled = false; btn.innerText = '🚀 PROCESAR Y ESCUCHAR'; }
+        }
+
+        async function crearVideoSequence() {
+            if(!currentAudioFile) return alert('Genera un audio de voz primero.');
+            const files = document.getElementById('mediaFiles').files;
+            if(files.length === 0) return alert('Sube fotos o videos.');
+            
+            const btn = event.target; btn.disabled = true; btn.innerText = '⌛ CREANDO...';
+            const formData = new FormData();
+            formData.append('audio', currentAudioFile);
+            for(let f of files) formData.append('media', f);
+
+            try {
+                const res = await fetch('/api/media/sequence', { method: 'POST', body: formData });
+                const d = await res.json();
+                if(d.status === 'ok') {
+                    const video = document.getElementById('masterMedia');
+                    video.src = d.url; video.style.display = 'block'; video.play();
+                    cargarBiblioteca();
+                }
+            } finally { btn.disabled = false; btn.innerText = '🎬 Unir con Audio de Voz'; }
         }
 
         async function cargarBiblioteca() {
-            const respuesta = await fetch('/api/biblioteca');
-            const resultado = await respuesta.json();
-            if (resultado.status !== 'ok' || !resultado.items.length) return;
-            const biblioteca = document.getElementById('libraryBox');
-            biblioteca.innerHTML = '';
-            resultado.items.forEach(item => {
-                const fila = document.createElement('div');
-                fila.className = 'library-item';
-                fila.innerHTML = `<span>🎵 ${item.archivo}</span><a href="${item.url}" download>📥 Descargar</a>`;
-                biblioteca.appendChild(fila);
+            const res = await fetch('/api/biblioteca');
+            const d = await res.json();
+            const box = document.getElementById('libList'); box.innerHTML = '';
+            d.items.forEach(i => {
+                const div = document.createElement('div'); div.className = 'lib-item';
+                const isVideo = i.archivo.endsWith('.mp4');
+                div.innerHTML = `<span>${isVideo ? '🎥' : '🎵'} ${i.archivo}</span> <a href="${i.url}" download class="download-link">Bajar</a>`;
+                div.onclick = (e) => { 
+                    if(e.target.tagName === 'A') return;
+                    if(isVideo) {
+                        const v = document.getElementById('masterMedia'); v.src = i.url; v.style.display = 'block'; v.play();
+                    } else {
+                        const a = document.getElementById('masterAudio'); a.src = i.url; a.play();
+                    }
+                };
+                box.appendChild(div);
             });
         }
 
-        cargarBiblioteca().catch(() => {});
-        function iniciarKaraokeVisual(textoCompleto) {
-            const box = document.getElementById('karaokeBox');
-            const palabras = textoCompleto.split(' '); let index = 0; box.innerHTML = '';
-            palabras.forEach((p, i) => {
-                const span = document.createElement('span'); span.id = 'w_' + i; span.innerText = p + ' '; box.appendChild(span);
-            });
-            const audio = document.getElementById('audioPlayer');
-            const interval = setInterval(() => {
-                if (audio.paused) return;
-                const prev = document.getElementById('w_' + (index - 1)); if(prev) prev.classList.remove('active');
-                const curr = document.getElementById('w_' + index);
-                if(curr) { curr.classList.add('active'); curr.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); index++; }
-                else { clearInterval(interval); }
-            }, 300);
+        async function vaciarApp() {
+            if(confirm('¿Borrar historial de la app?')) { await fetch('/api/limpiar', {method: 'POST'}); cargarBiblioteca(); }
         }
 
-        function actualizarBiblioteca(nombre, url) {
-            const lib = document.getElementById('libraryBox');
-            if(lib.innerHTML.includes('Sin producciones')) lib.innerHTML = '';
-            const item = document.createElement('div');
-            item.className = 'library-item';
-            item.innerHTML = `<span>🎵 ${nombre}.mp3</span> <a href="${url}" download>📥 Descargar</a>`;
-            lib.prepend(item);
-        }
+        document.getElementById('mainText').oninput = e => { document.getElementById('charCount').innerText = e.target.value.length + ' chars'; };
+        cargarVoces(); cargarBiblioteca();
     </script>
 </body>
 </html>
 """
 
-# --- MOTORES DE BACKEND ROBUSTOS ---
+# --- BACKEND MULTIMEDIA ---
 
-def fragmentar_texto_extremo(texto: str, max_chars: int = 3500) -> list:
-    parrafos = [p.strip() for p in re.split(r'\n+', texto) if len(p.strip()) > 0]
-    bloques_finales = []
-    for p in parrafos:
-        if len(p) <= max_chars:
-            bloques_finales.append(p)
+def split_text(text, limit=3500):
+    # Divide por puntos seguidos de espacio para no romper frases
+    sentences = re.split(r'(?<=\\.) ', text)
+    chunks = []
+    current = ""
+    for s in sentences:
+        if len(current) + len(s) < limit:
+            current += s
         else:
-            palabras = p.split(' ')
-            bloque_actual = []
-            longitud_actual = 0
-            for w in palabras:
-                if longitud_actual + len(w) + 1 > max_chars:
-                    bloques_finales.append(" ".join(bloque_actual))
-                    bloque_actual = [w]
-                    longitud_actual = len(w)
-                else:
-                    bloque_actual.append(w)
-                    longitud_actual += len(w) + 1
-            if bloque_actual:
-                bloques_finales.append(" ".join(bloque_actual))
-    return bloques_finales
+            chunks.append(current.strip())
+            current = s
+    if current: chunks.append(current.strip())
+    return [c for c in chunks if c]
 
-def validar_nombre(nombre: str, extension: str = "mp3") -> str:
-    limpio = secure_filename(str(nombre or "produccion_vinx"))
-    base = Path(limpio).stem[:80] or "produccion_vinx"
-    return f"{base}.{extension}"
-
-def extension_permitida(nombre: str) -> bool:
-    return Path(nombre).suffix.lower().lstrip(".") in ALLOWED_EXTENSIONS
-
-def validar_texto(texto: str) -> str:
-    texto = str(texto or "").strip()
-    if not texto:
-        raise ValueError("El texto no puede estar vacío")
-    if len(texto) > 1_000_000:
-        raise ValueError("El texto supera el límite permitido")
-    return texto
-
-def ejecutar_ffmpeg(argumentos: list[str]):
-    ejecutable = shutil.which("ffmpeg")
-    if not ejecutable:
-        try:
-            import imageio_ffmpeg
-            ejecutable = imageio_ffmpeg.get_ffmpeg_exe()
-        except ImportError:
-            ejecutable = None
-    if not ejecutable:
-        raise RuntimeError("FFmpeg no está instalado. Instale ffmpeg o imageio-ffmpeg")
-    return subprocess.run(
-        [ejecutable, "-y", *argumentos],
-        capture_output=True,
-        text=True,
-        check=True
-    )
-
-def generar_texto_ia(prompt: str, proveedor: str = "gemini", modelo_local: str = "llama3.2") -> str:
-    prompt = validar_texto(prompt)
-    if proveedor == "gemini" and GEMINI_API_KEY and genai is not None:
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
-            return response.text.strip()
-        except Exception as e:
-            print(f"Fallback Gemini error: {e}")
-
+@app.route('/api/voices')
+def get_voices():
     try:
-        payload = {"model": modelo_local, "prompt": prompt, "stream": False}
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
-        return resp.json().get("response", "").strip()
-    except Exception as e:
-        return f"Guion estructurado: {prompt}"
+        proc = subprocess.run(["edge-tts", "--list-voices"], capture_output=True, text=True)
+        voices = []
+        for line in proc.stdout.strip().split('\\n')[2:]:
+            parts = re.split(r'\\s{2,}', line)
+            if len(parts) >= 2: voices.append({"Name": parts[0], "Gender": parts[1]})
+        return jsonify(voices)
+    except:
+        return jsonify([{"Name": "es-MX-DaliaNeural", "Gender": "Female"}])
 
-async def sintetizar_bloque(texto: str, voz: str, rate: str, pitch: str, ruta_mp3: str, ruta_srt: str):
-    communicator = edge_tts.Communicate(texto, voz, rate=rate, pitch=pitch)
-    submaker = edge_tts.SubMaker()
-
-    with open(ruta_mp3, "wb") as file:
-        async for chunk in communicator.stream():
-            if chunk["type"] == "audio":
-                file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                submaker.feed(chunk)
-
-    srt_data = submaker.get_srt()
-    with open(ruta_srt, "w", encoding="utf-8") as f:
-        f.write(srt_data if srt_data else "")
-
-def procesar_texto_infinito(texto: str, voz: str, rate: int, pitch: int, filename: str) -> str:
-    bloques = fragmentar_texto_extremo(texto)
-    archivos_temporales = []
-
-    rate_str = f"{'+' if rate >= 0 else ''}{rate}%"
-    pitch_str = f"{'+' if pitch >= 0 else ''}{pitch}Hz"
-
+@app.route('/api/tts/infinite', methods=['POST'])
+def infinite_tts():
+    data = request.json
+    text = data.get("text", "")
+    voice = data.get("voice", "es-MX-DaliaNeural")
+    rate = f"{int(data.get('rate', 0)):+}%"
+    pitch = f"{int(data.get('pitch', 0)):+}Hz"
+    
+    id_p = uuid.uuid4().hex[:6]
+    chunks = split_text(text)
+    
+    files = []
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-
     try:
-        for idx, bloque in enumerate(bloques):
-            tmp_audio = os.path.join(DOWNLOAD_DIR, f"tmp_{uuid.uuid4().hex[:6]}_{idx}.mp3")
-            tmp_srt = os.path.join(DOWNLOAD_DIR, f"tmp_{uuid.uuid4().hex[:6]}_{idx}.srt")
-            loop.run_until_complete(sintetizar_bloque(bloque, voz, rate_str, pitch_str, tmp_audio, tmp_srt))
-            archivos_temporales.append(tmp_audio)
+        for i, c in enumerate(chunks):
+            p = os.path.join(DOWNLOAD_DIR, f"t_{id_p}_{i}.mp3")
+            async def run(txt, v, r, pi, path):
+                await edge_tts.Communicate(txt, v, rate=r, pitch=pi).save(path)
+            loop.run_until_complete(run(c, voice, rate, pitch, p))
+            files.append(p)
+        
+        final = f"Vinx_Audio_{id_p}.mp3"
+        f_path = os.path.join(DOWNLOAD_DIR, final)
+        lst = os.path.join(DOWNLOAD_DIR, f"l_{id_p}.txt")
+        with open(lst, "w") as f:
+            for fp in files: f.write(f"file \'{os.path.abspath(fp)}\'\\n")
+        
+        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", f_path], check=True)
+        os.remove(lst)
+        for fp in files: os.remove(fp)
+        registrar_produccion(final, final, "audio")
+        return jsonify({"status": "ok", "url": f"/download/{final}", "filename": final})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
     finally:
         loop.close()
 
-    output_mp3 = os.path.join(DOWNLOAD_DIR, f"{filename}.mp3")
-    concat_list = os.path.join(DOWNLOAD_DIR, f"list_{uuid.uuid4().hex[:6]}.txt")
-
-    with open(concat_list, "w", encoding="utf-8") as f:
-        for audio in archivos_temporales:
-            f.write(f"file '{audio}'\n")
-
+@app.route('/api/media/sequence', methods=['POST'])
+def sequence_media():
+    audio_file = request.form.get("audio")
+    media_files = request.files.getlist("media")
+    if not audio_file or not media_files: return jsonify({"status": "error", "error": "Faltan archivos"}), 400
+    
+    id_p = uuid.uuid4().hex[:6]
+    audio_path = os.path.join(DOWNLOAD_DIR, audio_file)
+    
+    temp_paths = []
+    for m in media_files:
+        p = os.path.join(DOWNLOAD_DIR, f"m_{id_p}_{secure_filename(m.filename)}")
+        m.save(p)
+        temp_paths.append(p)
+        
     try:
-        ejecutar_ffmpeg([
-            "-f", "concat", "-safe", "0", "-i", concat_list,
-            "-c", "copy", output_mp3
-        ])
+        output = f"Vinx_Video_{id_p}.mp4"
+        out_path = os.path.join(DOWNLOAD_DIR, output)
+        
+        # Slideshow de imágenes si son varias, o video con audio
+        if temp_paths[0].lower().endswith(('.jpg', '.png', '.jpeg')):
+            # Crear slideshow: 3 segundos por imagen
+            lst_img = os.path.join(DOWNLOAD_DIR, f"img_{id_p}.txt")
+            with open(lst_img, "w") as f:
+                for tp in temp_paths: f.write(f"file \'{os.path.abspath(tp)}\'\\nduration 3\\n")
+            
+            subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lst_img, "-i", audio_path, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", out_path], check=True)
+            os.remove(lst_img)
+        else:
+            # Primer video con el audio generado
+            subprocess.run(["ffmpeg", "-y", "-i", temp_paths[0], "-i", audio_path, "-c:v", "copy", "-c:a", "aac", "-map", "0:v:0", "-map", "1:a:0", "-shortest", out_path], check=True)
+            
+        registrar_produccion(output, output, "video")
+        return jsonify({"status": "ok", "url": f"/download/{output}"})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
     finally:
-        if os.path.exists(concat_list):
-            os.remove(concat_list)
-        for tmp in archivos_temporales:
-            if os.path.exists(tmp):
-                os.remove(tmp)
+        for p in temp_paths: 
+            if os.path.exists(p): os.remove(p)
 
-    registrar_produccion(filename, f"{filename}.mp3", "audio")
-    return f"{filename}.mp3"
+@app.route('/api/limpiar', methods=['POST'])
+def limpiar():
+    for f in os.listdir(DOWNLOAD_DIR): os.remove(os.path.join(DOWNLOAD_DIR, f))
+    with sqlite3.connect(DATABASE_PATH) as db: db.execute("DELETE FROM producciones")
+    return jsonify({"status": "ok"})
 
-@app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE)
-
-@app.route("/api/ia/generar", methods=["POST"])
-def api_generar():
-    try:
-        data = request.get_json(silent=True) or {}
-        resultado = generar_texto_ia(
-            data.get("prompt", ""),
-            data.get("proveedor", "gemini"),
-            data.get("modelo_local", "llama3.2")
-        )
-        return jsonify({"status": "ok", "texto": resultado})
-    except ValueError as error:
-        return jsonify({"status": "error", "error": str(error)}), 400
-    except Exception:
-        app.logger.exception("Error generando contenido")
-        return jsonify({"status": "error", "error": "No se pudo generar el contenido"}), 500
-
-@app.route("/api/tts/sintetizar", methods=["POST"])
-def api_sintetizar():
-    try:
-        data = request.get_json(silent=True) or {}
-        texto = validar_texto(data.get("texto"))
-        voz = data.get("voz", "es-MX-DaliaNeural")
-        rate = max(-50, min(50, int(data.get("rate", 0))))
-        pitch = max(-20, min(20, int(data.get("pitch", 0))))
-        filename = Path(validar_nombre(
-            data.get("filename", f"audio_{uuid.uuid4().hex[:6]}"), "mp3"
-        )).stem
-
-        archivo_final = procesar_texto_infinito(texto, voz, rate, pitch, filename)
-        return jsonify({
-            "status": "ok",
-            "filename": archivo_final,
-            "audio_url": f"/download/{archivo_final}"
-        })
-    except ValueError as error:
-        return jsonify({"status": "error", "error": str(error)}), 400
-    except Exception:
-        app.logger.exception("Error sintetizando audio")
-        return jsonify({"status": "error", "error": "No se pudo generar el audio"}), 500
-
-@app.route("/api/media/upload", methods=["POST"])
-def api_media_upload():
-    archivo = request.files.get("archivo")
-
-    if not archivo or not archivo.filename:
-        return jsonify({"status": "error", "error": "No se recibió ningún archivo"}), 400
-
-    if not extension_permitida(archivo.filename):
-        return jsonify({"status": "error", "error": "Tipo de archivo no permitido"}), 400
-
-    nombre = secure_filename(archivo.filename)
-    destino = os.path.join(DOWNLOAD_DIR, nombre)
-    archivo.save(destino)
-    registrar_produccion(Path(nombre).stem, nombre, "video" if Path(nombre).suffix.lower() in {".mp4", ".webm", ".mov", ".avi"} else "audio")
-
-    return jsonify({
-        "status": "ok",
-        "filename": nombre,
-        "url": f"/download/{nombre}"
-    })
-
-@app.route("/api/biblioteca", methods=["GET"])
-def api_biblioteca():
+@app.route("/api/biblioteca")
+def biblioteca():
     with sqlite3.connect(DATABASE_PATH) as db:
         db.row_factory = sqlite3.Row
-        filas = db.execute(
-            "SELECT nombre, archivo, tipo, creado_en FROM producciones ORDER BY id DESC LIMIT 100"
-        ).fetchall()
-    return jsonify({
-        "status": "ok",
-        "items": [
-            {
-                "nombre": fila["nombre"],
-                "archivo": fila["archivo"],
-                "tipo": fila["tipo"],
-                "creado_en": fila["creado_en"],
-                "url": f"/download/{fila['archivo']}"
-            }
-            for fila in filas
-        ]
-    })
+        rows = db.execute("SELECT archivo FROM producciones ORDER BY id DESC").fetchall()
+    return jsonify({"status": "ok", "items": [{"archivo": r["archivo"], "url": f"/download/{r['archivo']}"} for r in rows]})
 
-@app.route("/api/media/video", methods=["POST"])
-def api_generar_video():
-    try:
-        data = request.get_json(silent=True) or {}
-        audio = validar_nombre(data.get("audio"), "mp3")
-        ruta_audio = os.path.join(DOWNLOAD_DIR, audio)
-        if not os.path.isfile(ruta_audio):
-            return jsonify({"status": "error", "error": "No se encontró el audio"}), 404
-
-        base = Path(audio).stem
-        video = f"{base}_video.mp4"
-        ruta_video = os.path.join(DOWNLOAD_DIR, video)
-        ejecutar_ffmpeg([
-            "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30",
-            "-i", ruta_audio, "-shortest",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-movflags", "+faststart", ruta_video
-        ])
-        registrar_produccion(base, video, "video")
-        return jsonify({
-            "status": "ok",
-            "filename": video,
-            "video_url": f"/download/{video}"
-        })
-    except RuntimeError as error:
-        return jsonify({"status": "error", "error": str(error)}), 503
-    except subprocess.CalledProcessError as error:
-        app.logger.error("FFmpeg: %s", error.stderr[-1000:])
-        return jsonify({"status": "error", "error": "FFmpeg no pudo generar el vídeo"}), 422
-
-@app.route("/api/media/stems", methods=["POST"])
-def api_separar_audio():
-    try:
-        data = request.get_json(silent=True) or {}
-        audio = validar_nombre(data.get("audio"), "mp3")
-        ruta_audio = os.path.join(DOWNLOAD_DIR, audio)
-        if not os.path.isfile(ruta_audio):
-            return jsonify({"status": "error", "error": "No se encontró el audio"}), 404
-
-        base = Path(audio).stem
-        mono = f"{base}_mono.wav"
-        ruta_mono = os.path.join(DOWNLOAD_DIR, mono)
-        ejecutar_ffmpeg(["-i", ruta_audio, "-ac", "1", "-ar", "44100", ruta_mono])
-        registrar_produccion(base, mono, "audio")
-        return jsonify({
-            "status": "ok",
-            "files": [{"filename": mono, "url": f"/download/{mono}"}],
-            "nota": "Separación básica a mono completada. Para stems IA instale Demucs."
-        })
-    except RuntimeError as error:
-        return jsonify({"status": "error", "error": str(error)}), 503
-    except subprocess.CalledProcessError:
-        return jsonify({"status": "error", "error": "No se pudo procesar el audio"}), 422
-
-@app.route("/api/exportar/zip", methods=["POST"])
-def api_exportar_zip():
-    try:
-        data = request.get_json(silent=True) or {}
-        nombre_audio = validar_nombre(data.get("filename"), "mp3")
-        ruta_audio = os.path.join(DOWNLOAD_DIR, nombre_audio)
-
-        if not os.path.isfile(ruta_audio):
-            return jsonify({
-                "status": "error",
-                "error": "La producción todavía no existe"
-            }), 404
-
-        base = Path(nombre_audio).stem
-        nombre_zip = f"{base}_distribucion.zip"
-        ruta_zip = os.path.join(DOWNLOAD_DIR, nombre_zip)
-        metadatos = {
-            "aplicacion": "VINX0V0Z",
-            "archivo_audio": nombre_audio,
-            "generado_en": datetime.now(timezone.utc).isoformat(),
-            "formato": "MP3"
-        }
-
-        with zipfile.ZipFile(ruta_zip, "w", zipfile.ZIP_DEFLATED) as paquete:
-            paquete.write(ruta_audio, arcname=nombre_audio)
-            ruta_srt = os.path.join(DOWNLOAD_DIR, f"{base}.srt")
-            if os.path.isfile(ruta_srt):
-                paquete.write(ruta_srt, arcname=f"{base}.srt")
-            paquete.writestr("metadatos.json", json.dumps(metadatos, ensure_ascii=False, indent=2))
-
-        return jsonify({
-            "status": "ok",
-            "filename": nombre_zip,
-            "download_url": f"/download/{nombre_zip}"
-        })
-    except Exception:
-        app.logger.exception("Error exportando paquete ZIP")
-        return jsonify({
-            "status": "error",
-            "error": "No se pudo crear el paquete ZIP"
-        }), 500
+@app.route('/')
+def index(): return render_template_string(HTML_TEMPLATE)
 
 @app.route("/download/<path:filename>")
-def download(filename):
-    nombre = secure_filename(filename)
-    if nombre != filename or not nombre:
-        return jsonify({"status": "error", "error": "Archivo no válido"}), 400
-
-    ruta = os.path.join(DOWNLOAD_DIR, nombre)
-    if not os.path.isfile(ruta):
-        return jsonify({"status": "error", "error": "Archivo no encontrado"}), 404
-
-    return send_from_directory(DOWNLOAD_DIR, nombre, as_attachment=False)
+def download(filename): return send_from_directory(DOWNLOAD_DIR, secure_filename(filename))
 
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", "5000")),
-        debug=os.environ.get("FLASK_DEBUG", "0") == "1"
-    )
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))
