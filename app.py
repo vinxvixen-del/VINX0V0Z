@@ -27,9 +27,10 @@ ALLOWED_EXTENSIONS = {
     "mov", "avi", "srt", "vtt", "txt"
 }
 
-DOWNLOAD_DIR = "/sdcard/Download" if os.path.exists("/sdcard/Download") else os.path.abspath("downloads")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOWNLOAD_DIR = os.path.join(BASE_DIR, "outputs")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vinx0voz.db")
+DATABASE_PATH = os.path.join(BASE_DIR, "vinx0voz.db")
 
 def inicializar_base_datos():
     with sqlite3.connect(DATABASE_PATH) as db:

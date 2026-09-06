@@ -34,7 +34,7 @@ android {
 
     def backendUrl = project.findProperty("BACKEND_URL")
             ?: System.getenv("BACKEND_URL")
-            ?: "https://example.com"
+            ?: "https://vinx0v0z.onrender.com/"
 
     defaultConfig {
         applicationId "com.vinx0voz.app"
