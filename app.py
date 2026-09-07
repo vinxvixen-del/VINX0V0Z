@@ -43,7 +43,7 @@ def registrar_produccion(nombre: str, archivo: str, tipo: str = "audio"):
 
 inicializar_base_datos()
 
-# --- INTERFAZ FUNCTIONAL PRO (CONVERTIDOR & REPRODUCTOR) ---
+# --- INTERFAZ FUNCTIONAL PRO ---
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -90,8 +90,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
         .card h3 { margin: 0 0 10px 0; font-size: 1rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 5px; }
 
-        /* EDITOR GIGANTE */
-        .editor-box { flex: 1; display: flex; flex-direction: column; }
         textarea {
             flex: 1; width: 100%; background: #010409; border: 1px solid var(--border);
             color: #fff; padding: 15px; border-radius: 8px; font-size: 1.1rem; line-height: 1.5;
@@ -99,7 +97,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
         textarea:focus { border-color: var(--accent); }
 
-        /* CONTROLES */
         .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
         select, input {
             width: 100%; padding: 10px; background: #0d1117; border: 1px solid var(--border);
@@ -116,15 +113,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .btn-green { background: var(--success); color: #fff; }
         .btn-orange { background: var(--gold); color: #000; }
 
-        /* REPRODUCTORES */
         .media-container { background: #000; border-radius: 8px; padding: 5px; text-align: center; }
         video { width: 100%; max-height: 180px; border-radius: 4px; display: none; }
         audio { width: 100%; margin-top: 5px; }
 
-        /* STATUS */
         #statusInfo { font-size: 0.8rem; margin-top: 5px; color: var(--gold); text-align: center; height: 1.2rem; }
 
-        /* BIBLIOTECA */
         .library { flex: 1; overflow-y: auto; background: #010409; border-radius: 6px; border: 1px solid var(--border); }
         .lib-item {
             display: flex; justify-content: space-between; align-items: center;
@@ -144,11 +138,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div id="statusInfo">Listo para trabajar.</div>
 
     <div class="dashboard">
-        <!-- IZQUIERDA: CONVERTIDOR -->
         <div class="column-left">
-            <div class="card editor-box">
+            <div class="card" style="flex:1">
                 <h3>✍️ CONVERTIDOR TXTVOZ</h3>
-                <textarea id="textoInput" placeholder="Escribe o pega aquí textos infinitos para convertirlos en voz..."></textarea>
+                <textarea id="textoInput" placeholder="Escribe o pega aquí textos largos..."></textarea>
                 
                 <div class="controls">
                     <div>
@@ -176,7 +169,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
 
-        <!-- DERECHA: REPRODUCTOR Y ARCHIVOS -->
         <div class="column-right">
             <div class="card">
                 <h3>🎬 REPRODUCTOR MAESTRO</h3>
@@ -190,18 +182,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
 
             <div class="card" style="flex:1;">
-                <h3>📂 PRODUCCIONES RECIENTES</h3>
-                <div class="library" id="libList">
-                    <div style="padding:20px; text-align:center; color:var(--border);">No hay archivos aún.</div>
-                </div>
+                <h3>📂 HISTORIAL</h3>
+                <div class="library" id="libList"></div>
                 <button class="btn btn-orange" style="margin-top:10px;" onclick="limpiarTodo()">🗑️ LIMPIAR HISTORIAL</button>
             </div>
         </div>
     </div>
 
     <script>
-        let ultimoAudio = "";
-
         function setStatus(msg, isError = false) {
             const s = document.getElementById('statusInfo');
             s.innerText = msg;
@@ -212,11 +200,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const text = document.getElementById('textoInput').value.trim();
             const voice = document.getElementById('vozSelect').value;
             const rate = document.getElementById('rateSelect').value;
-            if(!text) return alert('Por favor ingresa un texto.');
+            if(!text) return alert('Ingresa un texto.');
 
             const btn = document.getElementById('btnProcesar');
             btn.disabled = true;
-            setStatus("⏳ Iniciando motor de voz...");
+            setStatus("⏳ Procesando... puede tardar varios segundos.");
 
             try {
                 const response = await fetch('/api/tts/pro', {
@@ -227,19 +215,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const data = await response.json();
                 
                 if(data.status === 'ok') {
-                    setStatus("✅ ¡Conversión completada!");
-                    const audio = document.getElementById('mainAudio');
-                    audio.src = data.url;
-                    audio.play();
-                    ultimoAudio = data.filename;
+                    setStatus("✅ ¡Listo!");
+                    document.getElementById('mainAudio').src = data.url;
+                    document.getElementById('mainAudio').play();
                     actualizarBiblioteca();
                 } else {
                     setStatus("❌ Error: " + data.error, true);
-                    alert("Error en el servidor: " + data.error);
                 }
             } catch(e) {
-                setStatus("❌ Error de conexión", true);
-                alert("No se pudo conectar con el servidor.");
+                setStatus("❌ Error de red", true);
             } finally {
                 btn.disabled = false;
             }
@@ -247,20 +231,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         async function subirYProcesar() {
             const file = document.getElementById('inputFile').files[0];
-            if(!file) return alert("Selecciona un archivo primero.");
-
-            setStatus("⬆️ Subiendo archivo...");
+            if(!file) return alert("Selecciona un archivo.");
+            setStatus("⬆️ Subiendo...");
             const formData = new FormData();
             formData.append('archivo', file);
-
             try {
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
                 const data = await res.json();
                 if(data.status === 'ok') {
-                    setStatus("✅ Archivo listo.");
+                    setStatus("✅ Cargado.");
                     const video = document.getElementById('mainVideo');
                     const audio = document.getElementById('mainAudio');
-                    
                     if(file.type.startsWith('video/')) {
                         video.src = data.url; video.style.display = 'block'; video.play();
                     } else {
@@ -268,7 +249,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     }
                     actualizarBiblioteca();
                 }
-            } catch(e) { setStatus("❌ Fallo al subir", true); }
+            } catch(e) { setStatus("❌ Fallo", true); }
         }
 
         async function actualizarBiblioteca() {
@@ -276,19 +257,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const data = await res.json();
             const box = document.getElementById('libList');
             box.innerHTML = '';
-            if(data.items.length === 0) box.innerHTML = '<div style="padding:20px; text-align:center;">Vacío.</div>';
             data.items.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'lib-item';
-                div.innerHTML = `<span>${item.name}</span><div class="actions"><a href="${item.url}" download>BAJAR</a></div>`;
+                div.innerHTML = `<span>${item.name}</span><a href="${item.url}" download>BAJAR</a>`;
                 div.onclick = (e) => {
                     if(e.target.tagName === 'A') return;
-                    const video = document.getElementById('mainVideo');
-                    const audio = document.getElementById('mainAudio');
+                    const v = document.getElementById('mainVideo');
+                    const a = document.getElementById('mainAudio');
                     if(item.name.endsWith('.mp4')) {
-                        video.src = item.url; video.style.display = 'block'; video.play();
+                        v.src = item.url; v.style.display = 'block'; v.play();
                     } else {
-                        video.style.display = 'none'; audio.src = item.url; audio.play();
+                        v.style.display = 'none'; a.src = item.url; a.play();
                     }
                 };
                 box.appendChild(div);
@@ -296,10 +276,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         async function limpiarTodo() {
-            if(!confirm("¿Borrar todos los archivos de la app?")) return;
+            if(!confirm("¿Borrar historial?")) return;
             await fetch('/api/clear', {method: 'POST'});
             actualizarBiblioteca();
-            setStatus("🧹 App limpia.");
         }
 
         actualizarBiblioteca();
@@ -308,25 +287,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
-# --- BACKEND MULTIMEDIA ROBUSTO ---
-
-def clean_text(text):
-    return re.sub(r'[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\\s.,!?]', '', text)
-
 @app.route('/api/tts/pro', methods=['POST'])
 def api_tts_pro():
     try:
         data = request.json
-        raw_text = data.get("text", "")
+        text = data.get("text", "")
         voice = data.get("voice", "es-MX-DaliaNeural")
         rate = data.get("rate", "0%")
         
-        if not raw_text: return jsonify({"status": "error", "error": "Texto vacío"}), 400
+        if not text: return jsonify({"status": "error", "error": "Texto vacío"}), 400
         
-        # Segmentar texto por párrafos para evitar bloqueos
-        paragraphs = [p.strip() for p in raw_text.split('\\n') if p.strip()]
-        if not paragraphs: paragraphs = [raw_text]
-        
+        # Segmentar por longitud si no hay párrafos claros
+        chunks = []
+        for p in text.split('\n'):
+            p = p.strip()
+            if not p: continue
+            # Si el párrafo es muy largo, dividirlo por caracteres
+            while len(p) > 3000:
+                chunks.append(p[:3000])
+                p = p[3000:]
+            chunks.append(p)
+            
         id_job = uuid.uuid4().hex[:6]
         temp_files = []
         
@@ -334,61 +315,42 @@ def api_tts_pro():
         asyncio.set_event_loop(loop)
         
         try:
-            for i, p in enumerate(paragraphs):
-                # Limpiar texto de caracteres que rompan edge-tts
-                p_clean = p[:4000] # Limite de seguridad por fragmento
-                fname = f"part_{id_job}_{i}.mp3"
-                fpath = os.path.join(DOWNLOAD_DIR, fname)
-                
-                async def run_task():
-                    communicate = edge_tts.Communicate(p_clean, voice, rate=rate)
-                    await communicate.save(fpath)
-                
-                loop.run_until_complete(run_task())
+            for i, c in enumerate(chunks):
+                fpath = os.path.join(DOWNLOAD_DIR, f"p_{id_job}_{i}.mp3")
+                async def run_tts():
+                    await edge_tts.Communicate(c, voice, rate=rate).save(fpath)
+                loop.run_until_complete(run_tts())
                 if os.path.exists(fpath): temp_files.append(fpath)
             
-            if not temp_files: return jsonify({"status": "error", "error": "No se generó audio"}), 500
-            
-            # UNIÓN FINAL CON FFMPEG
-            final_filename = f"VINX_{id_job}.mp3"
-            final_path = os.path.join(DOWNLOAD_DIR, final_filename)
+            final_name = f"Vinx_Prod_{id_job}.mp3"
+            final_path = os.path.join(DOWNLOAD_DIR, final_name)
             
             if len(temp_files) > 1:
                 list_path = os.path.join(DOWNLOAD_DIR, f"list_{id_job}.txt")
                 with open(list_path, "w", encoding='utf-8') as f:
                     for fp in temp_files:
-                        # IMPORTANTE: Usar saltos de línea reales \n no escapados \\n
                         f.write(f"file '{os.path.abspath(fp)}'\\n")
                 
-                # Re-abrir y corregir si python escribió mal
-                content = open(list_path).read().replace('\\\\n', '\\n')
-                with open(list_path, "w") as f: f.write(content)
-
-                subprocess.run([
-                    "ffmpeg", "-y", "-f", "concat", "-safe", "0", 
-                    "-i", list_path, "-c", "copy", final_path
-                ], check=True, capture_output=True)
-                
+                # EJECUCIÓN FFMPEG
+                subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", final_path], check=True)
                 os.remove(list_path)
                 for fp in temp_files: os.remove(fp)
             else:
                 os.rename(temp_files[0], final_path)
                 
-            registrar_produccion(final_filename, final_filename, "audio")
-            return jsonify({"status": "ok", "url": f"/download/{final_filename}", "filename": final_filename})
-            
+            registrar_produccion(final_name, final_name, "audio")
+            return jsonify({"status": "ok", "url": f"/download/{final_name}", "filename": final_name})
         finally:
             loop.close()
             
     except Exception as e:
-        app.logger.error(f"Error TTS: {str(e)}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/upload', methods=['POST'])
 def api_upload():
     f = request.files.get('archivo')
-    if not f: return jsonify({"status": "error", "error": "No hay archivo"}), 400
-    name = secure_filename(f.name or f.filename)
+    if not f: return jsonify({"status": "error"}), 400
+    name = secure_filename(f.filename)
     path = os.path.join(DOWNLOAD_DIR, name)
     f.save(path)
     registrar_produccion(name, name, "video" if name.lower().endswith(('.mp4','.mov')) else "audio")
@@ -398,7 +360,7 @@ def api_upload():
 def api_list():
     with sqlite3.connect(DATABASE_PATH) as db:
         db.row_factory = sqlite3.Row
-        rows = db.execute("SELECT archivo FROM producciones ORDER BY id DESC LIMIT 50").fetchall()
+        rows = db.execute("SELECT archivo FROM producciones ORDER BY id DESC").fetchall()
     return jsonify({"status": "ok", "items": [{"name": r["archivo"], "url": f"/download/{r['archivo']}"} for r in rows]})
 
 @app.route('/api/clear', methods=['POST'])
